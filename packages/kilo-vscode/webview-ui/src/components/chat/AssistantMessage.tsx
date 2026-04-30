@@ -10,6 +10,7 @@
 import { Component, For, Show, createMemo } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import { Part, PART_MAPPING, ToolRegistry } from "@kilocode/kilo-ui/message-part"
+import type { MessageFeedbackControls } from "@kilocode/kilo-ui/message-part"
 import type {
   AssistantMessage as SDKAssistantMessage,
   Part as SDKPart,
@@ -60,6 +61,7 @@ function matchToolRequest<T extends { tool?: { callID: string; messageID: string
 interface AssistantMessageProps {
   message: SDKAssistantMessage
   showAssistantCopyPartID?: string | null
+  feedback?: MessageFeedbackControls
 }
 
 function TodoToolCard(props: { part: ToolPart }) {
@@ -124,6 +126,7 @@ export const AssistantMessage: Component<AssistantMessageProps> = (props) => {
                               part={part}
                               message={props.message as SDKMessage}
                               showAssistantCopyPartID={props.showAssistantCopyPartID}
+                              feedback={props.feedback}
                               animate={
                                 part.type === "tool" &&
                                 ((part as unknown as ToolPart).state?.status === "pending" ||

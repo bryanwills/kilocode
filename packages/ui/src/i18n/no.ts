@@ -143,6 +143,11 @@ export const dict: Record<Keys, string> = {
   "ui.message.revertMessage": "Tilbakestill til dette punktet",
   "ui.message.copyResponse": "Kopier svar",
   "ui.message.copied": "Kopiert!",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "Dette var nyttig",
+  "ui.message.feedback.notHelpful": "Dette var ikke nyttig",
+  "ui.message.feedback.clearRating": "Fjern vurdering",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "Avbrutt",
   "ui.message.queued": "I kø",

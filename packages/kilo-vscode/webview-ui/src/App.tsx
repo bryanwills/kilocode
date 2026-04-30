@@ -32,6 +32,7 @@ registerVscodeToolOverrides()
 import HistoryView from "./components/history/HistoryView"
 import { MigrationWizard } from "./components/migration" // legacy-migration
 import { NotificationsProvider } from "./context/notifications"
+import { FeedbackProvider } from "./context/feedback"
 import type { Message as SDKMessage, Part as SDKPart } from "@kilocode/sdk/v2"
 import "./styles/chat.css"
 
@@ -351,11 +352,13 @@ const App: Component = () => {
                         <ConfigProvider>
                           <IndexingProvider>
                             <NotificationsProvider>
-                              <SessionProvider>
-                                <DataBridge>
-                                  <AppContent />
-                                </DataBridge>
-                              </SessionProvider>
+                              <FeedbackProvider>
+                                <SessionProvider>
+                                  <DataBridge>
+                                    <AppContent />
+                                  </DataBridge>
+                                </SessionProvider>
+                              </FeedbackProvider>
                             </NotificationsProvider>
                           </IndexingProvider>
                         </ConfigProvider>

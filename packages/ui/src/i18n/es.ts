@@ -140,6 +140,11 @@ export const dict = {
   "ui.message.revertMessage": "Restablecer a este punto",
   "ui.message.copyResponse": "Copiar respuesta",
   "ui.message.copied": "¡Copiado!",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "Esto fue útil",
+  "ui.message.feedback.notHelpful": "Esto no fue útil",
+  "ui.message.feedback.clearRating": "Borrar valoración",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "Interrumpido",
   "ui.message.queued": "En cola",

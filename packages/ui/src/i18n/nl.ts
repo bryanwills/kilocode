@@ -151,6 +151,11 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Bericht kopiëren",
   "ui.message.copyResponse": "Antwoord kopiëren",
   "ui.message.copied": "Gekopieerd",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "Dit was nuttig",
+  "ui.message.feedback.notHelpful": "Dit was niet nuttig",
+  "ui.message.feedback.clearRating": "Beoordeling wissen",
+  // kilocode_change end
   "ui.message.forkMessage": "Fork to new session",
   "ui.message.revertMessage": "Hiernaar terugzetten",
   "ui.message.revert": "Hiernaar terugdraaien",

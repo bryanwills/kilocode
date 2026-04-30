@@ -262,6 +262,23 @@ export namespace Telemetry {
     track(TelemetryEvent.ERROR, { error, context })
   }
 
+  // Feedback
+  export interface FeedbackProperties extends Record<string, unknown> {
+    providerID: string
+    modelID: string
+    variant?: string
+    rating: "up" | "down" | "cleared"
+    previousRating?: "up" | "down"
+    // Only populated for Kilo Gateway turns — non-Kilo providers must omit these.
+    sessionID?: string
+    messageID?: string
+    parentMessageID?: string
+  }
+
+  export function trackFeedback(props: FeedbackProperties) {
+    track(TelemetryEvent.FEEDBACK_SUBMITTED, props)
+  }
+
   export async function shutdown(): Promise<void> {
     await TracerSetup.shutdown()
     await Client.shutdown()

@@ -140,6 +140,11 @@ export const dict = {
   "ui.message.revertMessage": "이 시점으로 초기화",
   "ui.message.copyResponse": "응답 복사",
   "ui.message.copied": "복사됨!",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "도움이 됐어요",
+  "ui.message.feedback.notHelpful": "도움이 안 됐어요",
+  "ui.message.feedback.clearRating": "평가 지우기",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "중단됨",
   "ui.message.queued": "대기 중",

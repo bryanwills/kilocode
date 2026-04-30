@@ -156,6 +156,11 @@ export const dict = {
   "ui.message.copyMessage": "Копіювати повідомлення",
   "ui.message.copyResponse": "Копіювати відповідь",
   "ui.message.copied": "Скопійовано",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "Це було корисно",
+  "ui.message.feedback.notHelpful": "Це не було корисно",
+  "ui.message.feedback.clearRating": "Очистити оцінку",
+  // kilocode_change end
   "ui.message.forkMessage": "Fork to new session",
   "ui.message.revertMessage": "Повернутися сюди",
   "ui.message.revert": "Повернутися до цього місця",

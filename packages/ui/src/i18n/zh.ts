@@ -144,6 +144,11 @@ export const dict = {
   "ui.message.revertMessage": "重置到此点",
   "ui.message.copyResponse": "复制回复",
   "ui.message.copied": "已复制！",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "这有帮助",
+  "ui.message.feedback.notHelpful": "这没有帮助",
+  "ui.message.feedback.clearRating": "清除评分",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "已中断",
   "ui.message.queued": "排队中",

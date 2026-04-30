@@ -144,6 +144,11 @@ export const dict = {
   "ui.message.revertMessage": "Resetuj na ovu tačku",
   "ui.message.copyResponse": "Kopiraj odgovor",
   "ui.message.copied": "Kopirano!",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "Ovo je bilo korisno",
+  "ui.message.feedback.notHelpful": "Ovo nije bilo korisno",
+  "ui.message.feedback.clearRating": "Obriši ocjenu",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "Prekinuto",
   "ui.message.queued": "U redu",

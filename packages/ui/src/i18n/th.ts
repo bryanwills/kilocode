@@ -141,6 +141,11 @@ export const dict = {
   "ui.message.revertMessage": "รีเซ็ตไปยังจุดนี้",
   "ui.message.copyResponse": "คัดลอกคำตอบ",
   "ui.message.copied": "คัดลอกแล้ว!",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "สิ่งนี้มีประโยชน์",
+  "ui.message.feedback.notHelpful": "สิ่งนี้ไม่มีประโยชน์",
+  "ui.message.feedback.clearRating": "ล้างการให้คะแนน",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "ถูกขัดจังหวะ",
   "ui.message.queued": "อยู่ในคิว",

@@ -213,6 +213,7 @@ export class KiloProvider implements vscode.WebviewViewProvider, TelemetryProper
   private autocompleteConfigDisposable: vscode.Disposable | null = null
   private viewStateDisposable: vscode.Disposable | null = null
   private visibilityDisposable: vscode.Disposable | null = null
+  private telemetryChangeDisposable: vscode.Disposable | null = null
   private autoApproveBridge: ReturnType<typeof createAutoApproveBridge> | null = null
 
   private ignoreController: FileIgnoreController | null = null
@@ -350,6 +351,9 @@ export class KiloProvider implements vscode.WebviewViewProvider, TelemetryProper
       type: "connectionState",
       state: this.connectionState,
     })
+
+    // Push the current telemetry-enabled state so the webview can gate UI.
+    this.postMessage({ type: "telemetryState", enabled: vscode.env.isTelemetryEnabled })
 
     // Re-send ready so the webview can recover after refresh.
     if (serverInfo) {
@@ -576,6 +580,10 @@ export class KiloProvider implements vscode.WebviewViewProvider, TelemetryProper
     this.webviewMessageDisposable?.dispose()
     this.autocompleteConfigDisposable?.dispose()
     this.autocompleteConfigDisposable = watchAutocompleteConfig((msg) => this.postMessage(msg))
+    this.telemetryChangeDisposable?.dispose()
+    this.telemetryChangeDisposable = vscode.env.onDidChangeTelemetryEnabled((enabled) => {
+      this.postMessage({ type: "telemetryState", enabled })
+    })
     this.webviewMessageDisposable = webview.onDidReceiveMessage(async (message) => {
       const intercepted = await interceptMessage(message, {
         workspaceDir: (sid) => this.getWorkspaceDirectory(sid ?? this.currentSession?.id),
@@ -3402,6 +3410,7 @@ export class KiloProvider implements vscode.WebviewViewProvider, TelemetryProper
     this.visibilityDisposable?.dispose()
     this.webviewMessageDisposable?.dispose()
     this.autocompleteConfigDisposable?.dispose()
+    this.telemetryChangeDisposable?.dispose()
     this.autoApproveBridge?.dispose()
     this.streams.dispose()
     this.isWebviewReady = false

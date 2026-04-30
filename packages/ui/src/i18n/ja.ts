@@ -139,6 +139,11 @@ export const dict = {
   "ui.message.revertMessage": "この時点までリセット",
   "ui.message.copyResponse": "応答をコピー",
   "ui.message.copied": "コピーしました！",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "役に立ちました",
+  "ui.message.feedback.notHelpful": "役に立ちませんでした",
+  "ui.message.feedback.clearRating": "評価をクリア",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "中断",
   "ui.message.queued": "待機中",

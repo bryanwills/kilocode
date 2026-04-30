@@ -139,6 +139,11 @@ export const dict = {
   "ui.message.revertMessage": "Сбросить до этого момента",
   "ui.message.copyResponse": "Копировать ответ",
   "ui.message.copied": "Скопировано!",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "Это было полезно",
+  "ui.message.feedback.notHelpful": "Это было бесполезно",
+  "ui.message.feedback.clearRating": "Очистить оценку",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "Прервано",
   "ui.message.queued": "В очереди",

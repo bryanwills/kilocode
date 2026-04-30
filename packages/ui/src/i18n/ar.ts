@@ -140,6 +140,11 @@ export const dict = {
   "ui.message.revertMessage": "إعادة التعيين إلى هذه النقطة",
   "ui.message.copyResponse": "نسخ الرد",
   "ui.message.copied": "تم النسخ!",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "كان هذا مفيدًا",
+  "ui.message.feedback.notHelpful": "لم يكن هذا مفيدًا",
+  "ui.message.feedback.clearRating": "مسح التقييم",
+  // kilocode_change end
   "ui.message.revert": "Revert to here",
   "ui.message.interrupted": "تمت المقاطعة",
   "ui.message.queued": "في الانتظار",

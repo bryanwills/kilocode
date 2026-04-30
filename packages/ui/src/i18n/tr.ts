@@ -147,6 +147,11 @@ export const dict = {
   "ui.message.revert": "Revert to here",
   "ui.message.copyResponse": "Yanıtı kopyala",
   "ui.message.copied": "Kopyalandı",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "Bu yardımcı oldu",
+  "ui.message.feedback.notHelpful": "Bu yardımcı olmadı",
+  "ui.message.feedback.clearRating": "Değerlendirmeyi temizle",
+  // kilocode_change end
   "ui.message.interrupted": "Kesildi",
   "ui.message.queued": "Sırada",
   "ui.message.attachment.alt": "ek",

@@ -152,6 +152,11 @@ export const dict: Record<string, string> = {
   "ui.message.revertMessage": "Revert to here",
   "ui.message.copyResponse": "Copy response",
   "ui.message.copied": "Copied",
+  // kilocode_change start - message feedback
+  "ui.message.feedback.helpful": "This was helpful",
+  "ui.message.feedback.notHelpful": "This wasn't helpful",
+  "ui.message.feedback.clearRating": "Clear rating",
+  // kilocode_change end
   "ui.message.duration.seconds": "{{count}}s",
   "ui.message.duration.minutesSeconds": "{{minutes}}m {{seconds}}s",
   "ui.message.interrupted": "Interrupted",
