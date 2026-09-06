@@ -1,29 +1,37 @@
 /**
  * TaskToolExpanded component
- * Registers a custom "task" tool renderer that matches the v1.0.25 layout:
- * a BasicTool open by default with a compact scrollable list of child tool calls,
- * each shown as: icon + title + subtitle.
+ * Registers a custom "task" tool renderer with a compact scrollable list of
+ * child tool calls. Running tasks open immediately; completed tasks load their
+ * child details only when expanded.
  *
  * Call registerExpandedTaskTool() once at app startup to activate.
  */
 
-import { Component, createEffect, createMemo, For, Show, onCleanup } from "solid-js"
+import { Component, createEffect, createMemo, createSignal, Index, Show, on, onCleanup } from "solid-js"
 import { ToolRegistry, ToolProps, getToolInfo } from "@kilocode/kilo-ui/message-part"
-import { BasicTool } from "@kilocode/kilo-ui/basic-tool"
+import { BasicTool, initialOpen } from "@kilocode/kilo-ui/basic-tool"
 import { Icon } from "@kilocode/kilo-ui/icon"
 import { IconButton } from "@kilocode/kilo-ui/icon-button"
+import { Markdown } from "@kilocode/kilo-ui/markdown"
+import { Tooltip } from "@kilocode/kilo-ui/tooltip"
 import { useLanguage } from "../../context/language"
 import { useI18n } from "@kilocode/kilo-ui/context/i18n"
 import { createAutoScroll } from "@kilocode/kilo-ui/hooks"
 import { useSession } from "../../context/session"
 import { useVSCode } from "../../context/vscode"
-import { childID } from "../../context/session-utils"
+import { useWorktreeMode } from "../../context/worktree-mode"
+import { childID, latestTaskPart } from "../../context/session-utils"
+import { useConfig } from "../../context/config"
+import { openSubagent } from "./open-subagent"
+import { showChildPromotion, taskResult, taskRunning, taskVisible } from "./task-tool-state"
 
 const TaskToolRenderer: Component<ToolProps> = (props) => {
   const i18n = useI18n()
   const language = useLanguage()
   const session = useSession()
+  const { features } = useConfig()
   const vscode = useVSCode()
+  const worktree = useWorktreeMode()
 
   const childSessionId = () =>
     childID({
@@ -33,14 +41,48 @@ const TaskToolRenderer: Component<ToolProps> = (props) => {
       state: { metadata: props.metadata as { sessionId?: string } },
     })
 
-  const running = createMemo(() => props.status === "pending" || props.status === "running")
+  const promotable = createMemo(() =>
+    showChildPromotion(
+      childSessionId(),
+      props.partMetadata as Record<string, unknown> | undefined,
+      props.metadata as Record<string, unknown> | undefined,
+      session.allStatusMap(),
+      features().backgroundSubagents,
+      props.readonly,
+      latestTaskPart(
+        props.partID,
+        childSessionId(),
+        session.currentSessionID() ? session.getSessionToolParts(session.currentSessionID()!) : [],
+      ),
+    ),
+  )
 
-  // Warm child session data immediately so completed task tools already have
-  // their compact child tool list available when the user expands them.
+  const running = createMemo(() => taskRunning(props.status))
+  // BasicTool's forceOpen effect only fires onOpenChange on a false->true
+  // transition — a virtualized remount that starts with forceOpen already
+  // true never transitions, so this local signal must also seed itself from
+  // forceOpen directly, or the child list/result below stays hidden even
+  // though the accordion itself renders open.
+  const [open, setOpen] = createSignal(
+    initialOpen({
+      tool: props.tool,
+      partID: props.partID,
+      defaultOpen: running(),
+      forceOpen: props.forceOpen,
+    }),
+  )
+
+  let synced: string | undefined
   createEffect(() => {
-    const id = childSessionId()
+    const id = taskVisible(open(), childSessionId())
+    if (synced === id) return
+    if (synced) session.unsyncSession(synced)
+    synced = id
     if (!id) return
     session.syncSession(id)
+  })
+  onCleanup(() => {
+    if (synced) session.unsyncSession(synced)
   })
 
   const title = createMemo(() => i18n.t("ui.tool.agent", { type: props.input.subagent_type || props.tool }))
@@ -62,27 +104,60 @@ const TaskToolRenderer: Component<ToolProps> = (props) => {
     return id ? session.getSessionToolCount(id) : 0
   })
 
+  const result = createMemo(() => taskResult(props.output, childSessionId()))
+
   createEffect((prev: string | undefined) => {
-    const id = childSessionId()
+    const id = taskVisible(open(), childSessionId())
     if (prev && prev !== id) vscode.postMessage({ type: "streamSessionVisible", sessionID: prev, visible: false })
     if (id && id !== prev) vscode.postMessage({ type: "streamSessionVisible", sessionID: id, visible: true })
     return id
   })
 
   onCleanup(() => {
-    const id = childSessionId()
+    const id = taskVisible(open(), childSessionId())
     if (id) vscode.postMessage({ type: "streamSessionVisible", sessionID: id, visible: false })
   })
 
   const autoScroll = createAutoScroll({
     working: running,
   })
+  let view: HTMLDivElement | undefined
+  let body: HTMLDivElement | undefined
+  const viewport = (el: HTMLDivElement) => {
+    view = el
+    autoScroll.scrollRef(running() ? el : undefined)
+    if (!running()) el.scrollTop = 0
+  }
+  const content = (el: HTMLDivElement) => {
+    body = el
+    autoScroll.contentRef(running() ? el : undefined)
+  }
+
+  createEffect(
+    on(running, (active) => {
+      autoScroll.scrollRef(active ? view : undefined)
+      autoScroll.contentRef(active ? body : undefined)
+    }),
+  )
 
   const openInTab = (e: MouseEvent) => {
     e.stopPropagation()
     const id = childSessionId()
     if (!id) return
-    vscode.postMessage({ type: "openSubAgentViewer", sessionID: id, title: description() })
+    openSubagent({
+      sessionID: id,
+      title: description(),
+      parentSessionID: session.currentSessionID(),
+      worktree: !!worktree,
+      post: vscode.postMessage,
+    })
+  }
+
+  const background = (e: MouseEvent) => {
+    e.stopPropagation()
+    const id = session.currentSessionID()
+    const child = childSessionId()
+    if (id && child) vscode.postMessage({ type: "promoteBackgroundJob", jobID: child, sessionID: id })
   }
 
   const trigger = () => (
@@ -101,11 +176,22 @@ const TaskToolRenderer: Component<ToolProps> = (props) => {
         </Show>
       </div>
       <Show when={childSessionId()}>
+        <Show when={features().backgroundSubagents && promotable()}>
+          <Tooltip value={language.t("task.backgroundAgents.continueInBackground")} placement="top">
+            <IconButton
+              icon="arrow-down-to-line"
+              size="small"
+              variant="ghost"
+              aria-label={language.t("task.backgroundAgents.continueInBackground")}
+              onClick={background}
+            />
+          </Tooltip>
+        </Show>
         <IconButton
           icon="square-arrow-top-right"
           size="small"
           variant="ghost"
-          aria-label="Open sub-agent in tab"
+          aria-label={worktree ? "Open sub-agent in panel" : "Open sub-agent in tab"}
           onClick={openInTab}
         />
       </Show>
@@ -119,26 +205,27 @@ const TaskToolRenderer: Component<ToolProps> = (props) => {
         status={props.status}
         tool={props.tool}
         partID={props.partID}
-        callID={props.callID}
         trigger={trigger()}
-        defaultOpen
+        defaultOpen={running()}
+        forceOpen={props.forceOpen}
+        defer
+        onOpenChange={setOpen}
       >
-        <div ref={autoScroll.scrollRef} onScroll={autoScroll.handleScroll} data-component="tool-output" data-scrollable>
-          <div ref={autoScroll.contentRef} data-component="task-tools">
+        <div ref={viewport} onScroll={autoScroll.handleScroll} data-component="tool-output" data-scrollable>
+          <div ref={content} data-component="task-tools">
             <Show when={running() && childToolCount() === 0}>
               <div data-slot="task-tool-item" data-state="starting">
                 <span data-slot="task-tool-title">{language.t("session.messages.taskStarting")}</span>
               </div>
             </Show>
-            <For each={childToolParts()}>
+            <Show when={result()}>{(text) => <Markdown text={text()} />}</Show>
+            <Index each={childToolParts()}>
               {(item) => {
-                const info = createMemo(() => getToolInfo(item.tool, item.state?.input))
+                const info = createMemo(() => getToolInfo(item().tool, item().state?.input))
                 const subtitle = createMemo(() => {
                   if (info().subtitle) return info().subtitle
-                  const state = item.state as { status: string; title?: string }
-                  if (state.status === "completed" || state.status === "running") {
-                    return state.title
-                  }
+                  const state = item().state as { status: string; title?: string }
+                  if (state.status === "completed" || state.status === "running") return state.title
                   return undefined
                 })
                 return (
@@ -151,7 +238,7 @@ const TaskToolRenderer: Component<ToolProps> = (props) => {
                   </div>
                 )
               }}
-            </For>
+            </Index>
           </div>
         </div>
       </BasicTool>

@@ -12,6 +12,7 @@ import {
   buildFileAnnotations,
   clearReviewComposer,
   createReviewComposer,
+  labels,
   reviewAnnotationSpeechKey,
   reviewComposerDraft,
   reviewComposerEdit,
@@ -19,6 +20,7 @@ import {
   reviewEditSpeechKey,
 } from "../../webview-ui/diff-viewer/review-annotations"
 import type { WorktreeFileDiff } from "../../webview-ui/src/types/messages"
+import { parseReview, partReview, reviewMetadata } from "../../src/shared/review-comments"
 
 function diff(file: string, before: string, after: string): WorktreeFileDiff {
   return { file, before, after, additions: 1, deletions: 0 }
@@ -166,6 +168,41 @@ describe("formatReviewCommentsMarkdown", () => {
     const firstIdx = result.indexOf("**a.ts** (line 1):")
     const secondIdx = result.indexOf("**b.ts** (line 10):")
     expect(firstIdx).toBeLessThan(secondIdx)
+  })
+})
+
+describe("review message metadata", () => {
+  const comments = [comment({ file: "src/a.ts", line: 5, comment: "Fix this", selectedText: "const a = 1" })]
+  const content = `${formatReviewCommentsMarkdown(comments)}\n\nPlease address this feedback.`
+  const review = { version: 1 as const, comments }
+
+  it("round-trips review comments and extracts the visible body", () => {
+    expect(partReview(reviewMetadata(review), content)).toEqual({
+      data: review,
+      body: "Please address this feedback.",
+    })
+  })
+
+  it("extracts an empty body from a review-only message", () => {
+    expect(partReview(reviewMetadata(review), formatReviewCommentsMarkdown(comments))?.body).toBe("")
+  })
+
+  it("rejects malformed review comments", () => {
+    expect(parseReview({ ...review, comments: [{ ...comments[0], line: 0 }] }, content)).toBeUndefined()
+    expect(parseReview({ ...review, comments: [{ ...comments[0], side: "context" }] }, content)).toBeUndefined()
+    expect(parseReview({ ...review, comments: [{ ...comments[0], file: "../secret" }] }, content)).toBeUndefined()
+    expect(parseReview({ ...review, comments: [{ ...comments[0], file: "/tmp/secret" }] }, content)).toBeUndefined()
+  })
+
+  it("rejects metadata that does not match the hidden text", () => {
+    expect(parseReview(review, `unrelated hidden text\n\n${content}`)).toBeUndefined()
+  })
+
+  it("rejects oversized aggregate metadata before formatting it", () => {
+    const oversized = Array.from({ length: 6 }, (_, index) =>
+      comment({ id: `comment-${index}`, selectedText: "x".repeat(200_000) }),
+    )
+    expect(parseReview({ version: 1, comments: oversized }, "irrelevant")).toBeUndefined()
   })
 })
 
@@ -404,4 +441,20 @@ describe("getFilename", () => {
   it("returns just the filename from a path", () => {
     expect(getFilename("src/components/Button.tsx")).toBe("Button.tsx")
   })
+})
+
+it("shares review action labels and translates line numbers", () => {
+  const value = labels((key, params) => (params ? `${key}:${params.line}` : key))
+  expect(value).toMatchObject({
+    placeholder: "agentManager.review.commentPlaceholder",
+    cancel: "common.cancel",
+    comment: "agentManager.review.commentAction",
+    send: "prompt.action.send",
+    save: "common.save",
+    sendToChat: "agentManager.review.sendToChat",
+    edit: "common.edit",
+    delete: "common.delete",
+  })
+  expect(value.commentOnLine(3)).toBe("agentManager.review.commentOnLine:3")
+  expect(value.editCommentOnLine(7)).toBe("agentManager.review.editCommentOnLine:7")
 })

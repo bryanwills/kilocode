@@ -1,6 +1,8 @@
 import type { JSX } from "solid-js"
 import { Show } from "solid-js"
-import { SourceBadge as UiSourceBadge } from "@kilocode/kilo-web-ui/console"
+import { ConfigCountTag, ConfigTag, SourceBadge as UiSourceBadge } from "@kilocode/kilo-web-ui/console"
+
+export { ConfigCountTag, ConfigTag }
 
 export function ConfigPage(props: {
   title: JSX.Element
@@ -35,6 +37,31 @@ export function ConfigToolbar(props: {
         <Show when={props.meta}>{(meta) => <div class="config-toolbar-meta">{meta()}</div>}</Show>
       </section>
     </Show>
+  )
+}
+
+export function ConfigToggle(props: {
+  label: string
+  description: string
+  checked: boolean
+  disabled?: boolean
+  onChange: () => void
+}) {
+  return (
+    <button
+      class="ui-toggle"
+      classList={{ selected: props.checked }}
+      type="button"
+      aria-pressed={props.checked}
+      disabled={props.disabled}
+      onClick={props.onChange}
+    >
+      <span>
+        <strong>{props.label}</strong>
+        <small>{props.description}</small>
+      </span>
+      <ConfigTag tone={props.checked ? "success" : "neutral"}>{props.checked ? "On" : "Off"}</ConfigTag>
+    </button>
   )
 }
 

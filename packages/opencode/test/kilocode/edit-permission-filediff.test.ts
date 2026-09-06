@@ -3,28 +3,31 @@
 // permission-ask metadata. Without `filediff`, the VS Code extension's
 // PermissionDock cannot render the inline diff preview.
 
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { afterAll, afterEach, describe, test, expect } from "bun:test"
 import path from "path"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { EditTool } from "../../src/tool/edit"
-import { WithInstance } from "../../src/project/with-instance"
+import { provideTestInstance } from "../fixture/fixture"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
 import { LSP } from "../../src/lsp/lsp"
-import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Format } from "../../src/format"
 import { Agent } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
+import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Truncate } from "../../src/tool/truncate"
 import { SessionID, MessageID } from "../../src/session/schema"
 
 const runtime = ManagedRuntime.make(
   Layer.mergeAll(
-    LSP.defaultLayer,
-    AppFileSystem.defaultLayer,
-    Format.defaultLayer,
+    AppNodeBuilder.build(LSP.node),
+    AppNodeBuilder.build(FSUtil.node),
+    AppNodeBuilder.build(Format.node),
     Bus.layer,
-    Truncate.defaultLayer,
-    Agent.defaultLayer,
+    AppNodeBuilder.build(Truncate.node),
+    AppNodeBuilder.build(Agent.node),
+    AppNodeBuilder.build(EventV2Bridge.node),
   ),
 )
 
@@ -68,7 +71,7 @@ describe("edit tool permission filediff metadata", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "new.txt")
 
-      await WithInstance.provide({
+      await provideTestInstance({
         directory: tmp.path,
         fn: async () => {
           const edit = await resolve()
@@ -102,7 +105,7 @@ describe("edit tool permission filediff metadata", () => {
       const filepath = path.join(tmp.path, "existing.txt")
       await Bun.write(filepath, "line one\nline two\nline three\n")
 
-      await WithInstance.provide({
+      await provideTestInstance({
         directory: tmp.path,
         fn: async () => {
           const edit = await resolve()
@@ -136,7 +139,7 @@ describe("edit tool permission filediff metadata", () => {
       const filepath = path.join(tmp.path, "diff-check.txt")
       await Bun.write(filepath, "alpha\nbeta\ngamma\n")
 
-      await WithInstance.provide({
+      await provideTestInstance({
         directory: tmp.path,
         fn: async () => {
           const edit = await resolve()
@@ -167,7 +170,7 @@ describe("edit tool permission filediff metadata", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "result-new.txt")
 
-      await WithInstance.provide({
+      await provideTestInstance({
         directory: tmp.path,
         fn: async () => {
           const edit = await resolve()
@@ -195,7 +198,7 @@ describe("edit tool permission filediff metadata", () => {
       const filepath = path.join(tmp.path, "result-edit.txt")
       await Bun.write(filepath, "before\n")
 
-      await WithInstance.provide({
+      await provideTestInstance({
         directory: tmp.path,
         fn: async () => {
           const edit = await resolve()

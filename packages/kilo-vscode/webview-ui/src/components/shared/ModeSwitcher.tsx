@@ -13,6 +13,7 @@ import { Button } from "@kilocode/kilo-ui/button"
 import { useSession } from "../../context/session"
 import { useLanguage } from "../../context/language"
 import type { AgentInfo } from "../../types/messages"
+import { isEnterKeyCommitNotIme } from "../../utils/ime-enter"
 
 /** Format an agent for display. Uses displayName if available, otherwise title-cases the slug. */
 function formatAgentLabel(agent: AgentInfo): string {
@@ -34,8 +35,12 @@ export interface ModeSwitcherBaseProps {
   value: string
   /** Called when the user picks an agent */
   onSelect: (name: string) => void
+  /** Render inline instead of through a portal when nested in a dialog. */
+  portal?: boolean
   /** Delay outside dismissal while the popover opens inside a dialog. */
   deferDismiss?: boolean
+  /** Only respond to picker events from this prompt scope. */
+  trigger?: string
 }
 
 export const ModeSwitcherBase: Component<ModeSwitcherBaseProps> = (props) => {
@@ -43,9 +48,17 @@ export const ModeSwitcherBase: Component<ModeSwitcherBaseProps> = (props) => {
   const [focused, setFocused] = createSignal(-1)
   const language = useLanguage()
   let listRef: HTMLDivElement | undefined
+  // True while the picker was opened by the slash command rather than a click,
+  // so dismissal returns focus to the prompt like the model/variant pickers.
+  let slash = false
 
   // Listen for slash command trigger
-  const onTrigger = () => setOpen(true)
+  const onTrigger = (event: Event) => {
+    const source = (event as CustomEvent<{ source?: string }>).detail?.source
+    if (source !== props.trigger) return
+    slash = true
+    openSelected()
+  }
   window.addEventListener("openModePicker", onTrigger)
   onCleanup(() => window.removeEventListener("openModePicker", onTrigger))
 
@@ -64,11 +77,23 @@ export const ModeSwitcherBase: Component<ModeSwitcherBaseProps> = (props) => {
     items[clamped]?.focus()
   }
 
+  function openSelected() {
+    const idx = props.agents.findIndex((a) => a.name === props.value)
+    setFocused(idx >= 0 ? idx : 0)
+    setOpen(true)
+  }
+
   function onOpen(val: boolean) {
-    setOpen(val)
     if (val) {
-      const idx = props.agents.findIndex((a) => a.name === props.value)
-      requestAnimationFrame(() => focusItem(idx >= 0 ? idx : 0))
+      // A click on the trigger opens without the slash flag.
+      slash = false
+      openSelected()
+      return
+    }
+    setOpen(false)
+    if (slash) {
+      slash = false
+      requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("focusPrompt", { detail: { restore: true } })))
     }
   }
 
@@ -87,7 +112,7 @@ export const ModeSwitcherBase: Component<ModeSwitcherBaseProps> = (props) => {
     } else if (e.key === "End") {
       e.preventDefault()
       focusItem(len - 1)
-    } else if (e.key === "Enter" || e.key === " ") {
+    } else if (e.key === " " || isEnterKeyCommitNotIme(e)) {
       e.preventDefault()
       if (cur >= 0 && cur < len) pick(props.agents[cur].name)
     }
@@ -105,6 +130,7 @@ export const ModeSwitcherBase: Component<ModeSwitcherBaseProps> = (props) => {
         expanded={false}
         placement="top-start"
         minHeight={100}
+        portal={props.portal}
         deferDismiss={props.deferDismiss}
         open={open()}
         onOpenChange={onOpen}
@@ -134,6 +160,7 @@ export const ModeSwitcherBase: Component<ModeSwitcherBaseProps> = (props) => {
                   role="option"
                   aria-selected={agent.name === props.value}
                   tabindex={focused() === i() ? 0 : -1}
+                  data-autofocus={focused() === i() ? "" : undefined}
                   onClick={() => pick(agent.name)}
                   onFocus={() => setFocused(i())}
                 >

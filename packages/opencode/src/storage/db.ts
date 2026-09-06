@@ -5,15 +5,17 @@ export * from "drizzle-orm"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { LocalContext } from "@/util/local-context"
 import { Global } from "@opencode-ai/core/global"
+import { DbPreflight } from "@opencode-ai/core/kilocode/db-preflight" // kilocode_change
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
 import path from "path"
 import { readFileSync, readdirSync, existsSync } from "fs"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
-import { InstanceState } from "@/effect/instance-state"
+import { EffectBridge } from "@/effect/bridge"
 import { init } from "#db"
 import { Effect, Schema } from "effect"
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder" // kilocode_change
 
 declare const KILO_MIGRATIONS: { sql: string; timestamp: number; name: string }[] | undefined
 
@@ -23,19 +25,22 @@ export const NotFoundError = NamedError.create("NotFoundError", {
 
 const log = Log.create({ service: "db" })
 
-type ChannelDbFlags = Pick<RuntimeFlags.Info, "disableChannelDb">
+type DatabaseFlags = Pick<RuntimeFlags.Info, "disableChannelDb" | "skipMigrations">
 
 const readRuntimeFlags = () =>
-  Effect.runSync(RuntimeFlags.Service.useSync((flags) => flags).pipe(Effect.provide(RuntimeFlags.defaultLayer)))
+  Effect.runSync(RuntimeFlags.Service.useSync((flags) => flags).pipe(Effect.provide(AppNodeBuilder.build(RuntimeFlags.node))))
 
-export function getChannelPath(flags: ChannelDbFlags = readRuntimeFlags()) {
+export function getChannelPath(flags: Pick<DatabaseFlags, "disableChannelDb"> = readRuntimeFlags()) {
   if (["latest", "beta", "prod"].includes(InstallationChannel) || flags.disableChannelDb)
-    return path.join(Global.Path.data, "kilo.db")
+    return path.join(Global.Path.data, "kilo.db") // kilocode_change
   const safe = InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")
-  return path.join(Global.Path.data, `opencode-${safe}.db`)
+  const next = path.join(Global.Path.data, `kilo-${safe}.db`) // kilocode_change
+  const prev = path.join(Global.Path.data, `opencode-${safe}.db`) // kilocode_change
+  if (!existsSync(next) && existsSync(prev)) return prev // kilocode_change
+  return next // kilocode_change
 }
 
-export const getPath = (flags?: ChannelDbFlags) => {
+export const getPath = (flags?: Pick<DatabaseFlags, "disableChannelDb">) => {
   if (Flag.KILO_DB) {
     if (Flag.KILO_DB === ":memory:" || path.isAbsolute(Flag.KILO_DB)) return Flag.KILO_DB
     return path.join(Global.Path.data, Flag.KILO_DB)
@@ -93,12 +98,13 @@ let client: Client | undefined
 let loaded = false
 
 export const Client = Object.assign(
-  (flags?: ChannelDbFlags): Client => {
+  (flags: DatabaseFlags = readRuntimeFlags()): Client => {
     if (loaded) return client as Client
 
     const dbPath = getPath(flags)
     log.info("opening database", { path: dbPath })
 
+    DbPreflight.assertWritable(dbPath) // kilocode_change - actionable error (and self-heal for kilo-owned files) instead of an opaque wal_checkpoint crash on read-only db files
     const db = init(dbPath)
 
     db.run("PRAGMA journal_mode = WAL")
@@ -118,7 +124,7 @@ export const Client = Object.assign(
         count: entries.length,
         mode: typeof KILO_MIGRATIONS !== "undefined" ? "bundled" : "dev",
       })
-      if (Flag.KILO_SKIP_MIGRATIONS) {
+      if (flags.skipMigrations) {
         for (const item of entries) {
           item.sql = "select 1;"
         }
@@ -167,7 +173,7 @@ export function use<T>(callback: (trx: TxOrDb) => T): T {
 }
 
 export function effect(fn: () => any | Promise<any>) {
-  const bound = InstanceState.bind(fn)
+  const bound = EffectBridge.bind(fn)
   try {
     ctx.use().effects.push(bound)
   } catch {
@@ -188,7 +194,7 @@ export function transaction<T>(
   } catch (err) {
     if (err instanceof LocalContext.NotFound) {
       const effects: (() => void | Promise<void>)[] = []
-      const txCallback = InstanceState.bind((tx: TxOrDb) => ctx.provide({ tx, effects }, () => callback(tx)))
+      const txCallback = EffectBridge.bind((tx: TxOrDb) => ctx.provide({ tx, effects }, () => callback(tx)))
       const result = Client().transaction(txCallback, { behavior: options?.behavior })
       for (const effect of effects) effect()
       return result as NotPromise<T>

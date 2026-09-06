@@ -2,19 +2,23 @@ package ai.kilocode.client.session.views
 
 import ai.kilocode.client.session.model.Content
 import ai.kilocode.client.session.model.Tool
+import ai.kilocode.client.session.model.ToolApproval
 import ai.kilocode.client.session.model.ToolExecState
 import ai.kilocode.client.session.model.toolKind
 import ai.kilocode.client.session.ui.style.SessionEditorStyle
 import ai.kilocode.client.session.ui.style.SessionUiStyle
-import ai.kilocode.client.session.views.base.SecondarySessionPartView
 import ai.kilocode.client.session.views.tool.ToolView
+import com.intellij.openapi.editor.DefaultLanguageHighlighterColors
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import java.awt.Color
-import java.awt.image.BufferedImage
+import com.intellij.ui.scale.JBUIScale
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
+import java.awt.BorderLayout
+import java.awt.Container
 import javax.swing.JPanel
 import javax.swing.ScrollPaneConstants
-import javax.swing.border.Border
 
 /**
  * Tests for [ToolView].
@@ -96,31 +100,36 @@ class ToolViewTest : BasePlatformTestCase() {
         assertTrue(view.bodyCreated())
     }
 
-    fun `test bash tool uses secondary chrome`() {
-        val view = ToolView(tool("p1", "bash", ToolExecState.COMPLETED))
-        val base: Any = view
+    fun `test bash tool editor highlights command text`() {
+        val t = tool("p1", "bash", ToolExecState.COMPLETED).also {
+            it.input = mapOf("command" to "git remote -v", "description" to "View remotes")
+            it.output = "origin git@example.com:repo.git"
+        }
+        val view = track(ToolView(t))
 
-        assertTrue(base is SecondarySessionPartView)
+        view.toggle()
+        val field = view.bodyEditor()!!
+        val editor = field.getEditor(true)!!
+        val spans = editor.markupModel.allHighlighters.map {
+            field.text.substring(it.startOffset, it.endOffset) to it.textAttributesKey
+        }
+
+        assertTrue(spans.contains("git" to DefaultLanguageHighlighterColors.KEYWORD))
+        assertTrue(spans.contains("-v" to DefaultLanguageHighlighterColors.KEYWORD))
     }
 
-    fun `test unknown tool uses secondary chrome`() {
-        val view = ToolView(tool("p1", "mystery", ToolExecState.COMPLETED))
-        val base: Any = view
-
-        assertTrue(base is SecondarySessionPartView)
-    }
-
-    fun `test tool outline is drawn only while expanded`() {
+    fun `test tool draws no outline and separates the body with the standard gap`() {
         val view = track(ToolView(tool("p1", "bash", ToolExecState.COMPLETED).also {
             it.input = mapOf("command" to "pwd")
             it.output = "/tmp"
         }))
 
-        assertEquals(0, paint(view.border).alpha)
+        assertNull("collapsed card draws no outline", view.border)
         view.toggle()
-        assertEquals(SessionUiStyle.View.Outline.color().rgb, paint(view.border).rgb)
+        assertNull("expanded card draws no outline", view.border)
+        assertEquals(SessionUiStyle.View.contentGap(), (view.layout as BorderLayout).vgap)
         view.toggle()
-        assertEquals(0, paint(view.border).alpha)
+        assertNull("collapsed card draws no outline", view.border)
     }
 
     fun `test bash toggle collapses and expands`() {
@@ -135,6 +144,20 @@ class ToolViewTest : BasePlatformTestCase() {
         assertTrue(view.isExpanded())
         view.toggle()
         assertFalse(view.isExpanded())
+    }
+
+    fun `test expanded tool shows approval footer`() {
+        val t = tool("p1", "bash", ToolExecState.COMPLETED).also {
+            it.input = mapOf("command" to "pwd")
+            it.output = "/tmp"
+            it.approval = ToolApproval(source = "global")
+        }
+        val view = track(ToolView(t))
+
+        view.toggle()
+        view.syncApprovalReason(true)
+
+        assertTrue(texts(view).any { it.contains("Auto-approved by your global config") })
     }
 
     fun `test collapsed bash hides body`() {
@@ -257,6 +280,12 @@ class ToolViewTest : BasePlatformTestCase() {
         assertSmallEditorFont(view.stateFont(), style)
     }
 
+    fun `test tool header uses standard layout gap`() {
+        val view = track(ToolView(tool("p1", "bash", ToolExecState.COMPLETED).also { it.output = "done" }))
+
+        assertEquals(JBUI.scale(SessionUiStyle.View.Layout.GAP), headerGap(view))
+    }
+
     fun `test applyStyle updates tool fonts in place`() {
         val view = ToolView(tool("p1", "bash", ToolExecState.COMPLETED))
         val style = SessionEditorStyle.create(family = "Courier New", size = 25)
@@ -295,6 +324,31 @@ class ToolViewTest : BasePlatformTestCase() {
 
         assertEquals(15, view.bodyMaxRows())
         assertTrue(view.preferredSize.height > 0)
+    }
+
+    fun `test expanded body height ignores user scale factor`() {
+        // The tool body height comes from the editor line height, which tracks the IDE
+        // scale (editor font), not the JBUI user scale factor. Raising the user scale
+        // factor alone must not change the body height; a double-scaling regression would.
+        val original = JBUIScale.scale(1f)
+        val t = tool("p1", "bash", ToolExecState.COMPLETED).also {
+            it.input = mapOf("command" to "log")
+            it.output = (1..6).joinToString("\n") { line -> "line $line" }
+        }
+        try {
+            JBUIScale.setUserScaleFactorForTest(1f)
+            val view = track(ToolView(t))
+            view.toggle()
+            val before = view.bodyEditor()!!.preferredSize.height
+
+            JBUIScale.setUserScaleFactorForTest(2f)
+            view.applyStyle(SessionEditorStyle.current())
+            val after = view.bodyEditor()!!.preferredSize.height
+
+            assertEquals(before, after)
+        } finally {
+            JBUIScale.setUserScaleFactorForTest(original)
+        }
     }
 
     fun `test large tool output is truncated in preview`() {
@@ -356,6 +410,45 @@ class ToolViewTest : BasePlatformTestCase() {
         assertEquals("part99", view.contentId)
     }
 
+    // ---- header popup ------
+
+    fun `test tool header popup previews output when collapsed`() {
+        val view = track(ToolView(tool("g1", "grep", ToolExecState.COMPLETED).also { it.output = "match one\nmatch two" }))
+        val req = view.headerPopup()
+        assertNotNull(req)
+        val body = req!!.build()
+        try {
+            val editors = popupEditors(body.component)
+            editors.forEach { it.getEditor(true) }
+            assertEquals(listOf("match one\nmatch two"), editors.map { it.text })
+            assertTrue(body.component.preferredSize.height in 1..JBUI.scale(SessionUiStyle.View.Popup.MAX_HEIGHT))
+        } finally {
+            Disposer.dispose(body.disposable)
+        }
+    }
+
+    fun `test tool header popup is absent when empty or expanded`() {
+        val empty = track(ToolView(tool("g2", "grep", ToolExecState.COMPLETED)))
+        assertNull(empty.headerPopup())
+
+        val view = track(ToolView(tool("g3", "grep", ToolExecState.COMPLETED).also { it.output = "hit" }))
+        assertNotNull(view.headerPopup())
+        view.toggle()
+        assertNull(view.headerPopup())
+    }
+
+    fun `test tool header popup disposes editor after hide and churn`() {
+        val base = EditorFactory.getInstance().allEditors.size
+        val view = track(ToolView(tool("g4", "grep", ToolExecState.COMPLETED).also { it.output = "hit" }))
+        repeat(20) {
+            val body = view.headerPopup()!!.build()
+            popupEditors(body.component).forEach { it.getEditor(true) }
+            Disposer.dispose(body.disposable)
+        }
+        UIUtil.dispatchAllInvocationEvents()
+        assertEquals(base, EditorFactory.getInstance().allEditors.size)
+    }
+
     // ---- helpers ------
 
     private fun tool(id: String, name: String, state: ToolExecState, title: String? = null): Tool =
@@ -381,12 +474,16 @@ class ToolViewTest : BasePlatformTestCase() {
         assertTrue(font.size < style.editorSize)
     }
 
-    private fun paint(border: Border): Color {
-        val image = BufferedImage(3, 3, BufferedImage.TYPE_INT_ARGB)
-        val item = JPanel()
-        val graphics = image.createGraphics()
-        border.paintBorder(item, graphics, 0, 0, image.width, image.height)
-        graphics.dispose()
-        return Color(image.getRGB(0, 0), true)
+    private fun headerGap(view: ToolView): Int {
+        val row = view.components.filterIsInstance<JPanel>().single()
+        val header = (row.layout as BorderLayout).getLayoutComponent(BorderLayout.CENTER) as JPanel
+        return (header.layout as BorderLayout).hgap
     }
+
+    private fun texts(root: Container): List<String> = root.components.flatMap { child ->
+        val own = (child as? javax.swing.JLabel)?.text?.let(::listOf) ?: emptyList()
+        val nested = (child as? Container)?.let(::texts) ?: emptyList()
+        own + nested
+    }
+
 }

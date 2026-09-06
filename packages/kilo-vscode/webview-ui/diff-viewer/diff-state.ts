@@ -1,6 +1,18 @@
 import { createMemo, createSignal } from "solid-js"
 import type { WorktreeFileDiff } from "../src/types/messages"
 
+const sizeKeys = new WeakMap<
+  WorktreeFileDiff,
+  {
+    context: string | undefined
+    style: string
+    patch: string | undefined
+    before: string
+    after: string
+    key: object
+  }
+>()
+
 export function sameDiffMeta(left: WorktreeFileDiff, right: WorktreeFileDiff) {
   return (
     left.file === right.file &&
@@ -10,13 +22,31 @@ export function sameDiffMeta(left: WorktreeFileDiff, right: WorktreeFileDiff) {
     left.tracked === right.tracked &&
     left.generatedLike === right.generatedLike &&
     left.summarized === right.summarized &&
-    left.stamp === right.stamp
+    left.stamp === right.stamp &&
+    left.kind === right.kind
   )
 }
 
 export function diffToken(diff: WorktreeFileDiff) {
   const parts = [diff.status ?? "", diff.additions, diff.deletions, diff.tracked ?? "", diff.generatedLike ?? ""]
   return diff.stamp ?? parts.join(":")
+}
+
+export function diffSizeKey(context: string | undefined, diff: WorktreeFileDiff, style: string) {
+  const cached = sizeKeys.get(diff)
+  if (
+    cached &&
+    cached.context === context &&
+    cached.style === style &&
+    cached.patch === diff.patch &&
+    cached.before === diff.before &&
+    cached.after === diff.after
+  )
+    return cached.key
+
+  const key = {}
+  sizeKeys.set(diff, { context, style, patch: diff.patch, before: diff.before, after: diff.after, key })
+  return key
 }
 
 // Keep each rendered row mounted while live detail refreshes replace its data.
@@ -79,6 +109,7 @@ export function mergeWorktreeDiffs(prev: WorktreeFileDiff[], next: WorktreeFileD
       existing.before === diff.before &&
       existing.after === diff.after &&
       existing.patch === diff.patch &&
+      existing.image === diff.image &&
       sameDiffMeta(existing, diff)
     )
       return existing
@@ -91,12 +122,14 @@ export function mergeWorktreeDiffs(prev: WorktreeFileDiff[], next: WorktreeFileD
         before: existing.before,
         after: existing.after,
         patch: existing.patch,
+        image: existing.image,
         summarized: false,
       }
       if (
         existing.before === merged.before &&
         existing.after === merged.after &&
         existing.patch === merged.patch &&
+        existing.image === merged.image &&
         sameDiffMeta(existing, merged)
       )
         return existing

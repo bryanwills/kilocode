@@ -1,68 +1,45 @@
-import { type Component, createSignal, createMemo, For, Show, createEffect, on } from "solid-js"
-import { Diff } from "@kilocode/kilo-ui/diff"
+import { type Component, createSignal, createMemo, Show, type JSXElement } from "solid-js"
+import type { VirtualizerHandle } from "virtua/solid"
 import { Accordion } from "@kilocode/kilo-ui/accordion"
-import { StickyAccordionHeader } from "@kilocode/kilo-ui/sticky-accordion-header"
-import { FileIcon } from "@kilocode/kilo-ui/file-icon"
-import { DiffChanges } from "@kilocode/kilo-ui/diff-changes"
 import { Icon } from "@kilocode/kilo-ui/icon"
 import { Button } from "@kilocode/kilo-ui/button"
-import { RadioGroup } from "@kilocode/kilo-ui/radio-group"
 import { IconButton } from "@kilocode/kilo-ui/icon-button"
-import { Spinner } from "@kilocode/kilo-ui/spinner"
 import { Tooltip, TooltipKeybind } from "@kilocode/kilo-ui/tooltip"
-import type { DiffLineAnnotation, AnnotationSide, SelectedLineRange } from "@pierre/diffs"
 import type { WorktreeFileDiff } from "../src/types/messages"
-import { KILO_FILE_PATH_MIME } from "../src/utils/path-mentions"
 import { useLanguage } from "../src/context/language"
-import { useVSCode } from "../src/context/vscode"
-import { useServer } from "../src/context/server"
-import { useProvider } from "../src/context/provider"
-import { useConfig } from "../src/context/config"
-import { canUseSpeechToText, selectedSpeechToTextModel } from "../src/components/speech-to-text/availability"
-import { useSpeechToText } from "../src/components/speech-to-text/useSpeechToText"
-import {
-  getDirectory,
-  getFilename,
-  lineCount,
-  sanitizeReviewComments,
-  type ReviewComment,
-} from "../diff-viewer/review-comments"
-import {
-  buildFileAnnotations,
-  buildReviewAnnotation,
-  clearReviewComposer,
-  createReviewComposer,
-  reviewComposerDraft,
-  reviewComposerEdit,
-  reviewDraftSpeechKey,
-  reviewEditSpeechKey,
-  type AnnotationLabels,
-  type AnnotationMeta,
-  type ReviewComposer,
-  type ReviewDraft,
-} from "../diff-viewer/review-annotations"
-import { createReviewAnnotationSpeechRenderer } from "../diff-viewer/review-annotation-speech"
+import { DiffStyleSelect } from "../diff-viewer/InlineSelect"
+import type { ReviewComment } from "../diff-viewer/review-comments"
+import { createReviewComposer, type ReviewComposer } from "../diff-viewer/review-annotations"
 import {
   LONG_DIFF_MARKER_FILE_COUNT,
   allOpenFiles,
-  eagerDiffFiles,
-  initialOpenFiles,
+  isDiffExpandable,
   isLargeDiffFile,
+  sanitizeOpenFiles,
   toggleOpenFiles,
 } from "../diff-viewer/diff-open-policy"
 import { DiffEndMarker } from "../diff-viewer/DiffEndMarker"
+import { VirtualDiffList } from "../diff-viewer/VirtualDiffList"
 import { treeOrder } from "../diff-viewer/file-tree-utils"
-import { isMarkdownFile, MarkdownDiffView } from "../diff-viewer/MarkdownDiffView"
-import { createDiffRows, diffToken } from "../diff-viewer/diff-state"
+import { createDiffRows } from "../diff-viewer/diff-state"
+import { createDiffRequests, createDiffViewport } from "../diff-viewer/diff-requests"
+import { ReviewDiffItem } from "../diff-viewer/ReviewDiffItem"
+import { createReviewOpenState } from "../diff-viewer/review-state"
+import { createReviewScrollPreserver } from "../diff-viewer/review-scroll"
+import { createReviewController } from "../diff-viewer/review-controller"
+import { keepsNativeFocus, notice, reviewFocus, reviewSendAllKeybind } from "../diff-viewer/review-setup"
 
 // --- Data model ---
 
 interface DiffPanelProps {
   diffs: WorktreeFileDiff[]
   loading: boolean
+  active?: boolean
   loadingFiles?: Set<string>
   sessionId?: string
   sessionKey?: string
+  /** Well-known source notice kind (e.g. "snapshots-disabled"), shown as a banner. */
+  notice?: string
   diffStyle?: "unified" | "split"
   onDiffStyleChange?: (style: "unified" | "split") => void
   markdownRender?: boolean
@@ -71,361 +48,96 @@ interface DiffPanelProps {
   onCommentsChange: (comments: ReviewComment[]) => void
   composer?: ReviewComposer
   onSendAll?: () => void
+  onSendClick?: () => void
   onClose: () => void
   onExpand?: () => void
   onRequestDiff?: (file: string) => void
   onOpenFile?: (relativePath: string, line?: number) => void
+  onOpenDocument?: (relativePath: string) => void
   onRevertFile?: (file: string) => void
   revertingFiles?: Set<string>
   activeTerminalId?: string
+  /** Optional leading row rendered under the header (e.g. the scope selector). */
+  lead?: JSXElement
+  /** Defaults to true. Hides the per-file Revert action when false. */
+  canRevert?: boolean
 }
 
 export const DiffPanel: Component<DiffPanelProps> = (props) => {
   const { t } = useLanguage()
-  const vscode = useVSCode()
-  const server = useServer()
-  const provider = useProvider()
-  const { config } = useConfig()
-  const speech = useSpeechToText(vscode, server, { t })
-  const canUseSpeech = () => canUseSpeechToText(config(), provider.connected(), server.profileData())
-  const speechModel = () => selectedSpeechToTextModel(config())
-  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent)
-  const sendAllKeybind = () =>
-    isMac ? t("agentManager.review.sendAllShortcut.mac") : t("agentManager.review.sendAllShortcut.other")
-  const labels = (): AnnotationLabels => ({
-    commentOnLine: (line) => t("agentManager.review.commentOnLine", { line }),
-    editCommentOnLine: (line) => t("agentManager.review.editCommentOnLine", { line }),
-    placeholder: t("agentManager.review.commentPlaceholder"),
-    cancel: t("common.cancel"),
-    comment: t("agentManager.review.commentAction"),
-    save: t("common.save"),
-    sendToChat: t("agentManager.review.sendToChat"),
-    edit: t("common.edit"),
-    delete: t("common.delete"),
-  })
+  const noticeText = () => notice(t, props.notice)
+  const sendAllKeybind = () => reviewSendAllKeybind(t)
   const localComposer = createReviewComposer()
   const composer = () => props.composer ?? localComposer
-  const [open, setOpen] = createSignal<string[]>([])
-  const [draft, setDraft] = createSignal<ReviewDraft | null>(reviewComposerDraft(composer()))
-  const [editing, setEditing] = createSignal<string | null>(reviewComposerEdit(composer()))
-  const speechKeys = createMemo(() => {
-    const keys = new Set<string>()
-    const current = draft()
-    const edit = editing()
-    if (current) keys.add(reviewDraftSpeechKey(current))
-    if (edit) keys.add(reviewEditSpeechKey(edit))
-    return keys
-  })
-  const reviewSpeech = createReviewAnnotationSpeechRenderer({
-    speech,
-    enabled: canUseSpeech,
-    model: speechModel,
-    label: t,
-    keys: speechKeys,
-  })
-  let nextId = 0
-  // Tracks the session key for which initial open state has already run. When the
-  // key changes (different worktree) we expand reviewable files. Within the same key,
-  // only pruning happens so the user's manual collapse state is preserved.
-  let initializedKey: string | undefined
-  const requested = new Map<string, string>()
-
+  const reviewOpen = createReviewOpenState(
+    () => props.diffs,
+    () => props.sessionKey,
+  )
+  const open = reviewOpen.open
+  const setOpen = reviewOpen.setOpen
   // Reorder diffs to match the file-tree's depth-first visual order so
   // scrolling through the accordion matches the tree grouping.
   const sorted = createMemo(() => treeOrder(props.diffs))
   const rows = createDiffRows(sorted, () => props.sessionKey)
-  const eager = createMemo(() => eagerDiffFiles(sorted()))
 
-  const comments = () => props.comments
   const setComments = (next: ReviewComment[]) => props.onCommentsChange(next)
-  const updateComments = (updater: (prev: ReviewComment[]) => ReviewComment[]) => setComments(updater(comments()))
-
-  // Stable composer metadata refs avoid recreating the object on every signal read
-  // so pierre's annotation cache doesn't invalidate and destroy the textarea.
-  let draftMeta: AnnotationMeta | null = composer().draft
-  let editMeta: AnnotationMeta | null = composer().edit
+  const comments = () => props.comments
 
   // Ref to the scrollable container — used to preserve scroll position when
   // annotation changes cause pierre to fully re-render diffs
   let rootRef: HTMLDivElement | undefined
-  let scroller: HTMLDivElement | undefined
+  const [scroller, setScroller] = createSignal<HTMLDivElement>()
+  const [virtualizer, setVirtualizer] = createSignal<VirtualizerHandle>()
 
-  const focusRoot = () => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        rootRef?.focus()
-      })
-    })
-  }
+  const focusRoot = () => reviewFocus(() => rootRef)
 
-  const keepNativeFocus = (target: EventTarget | null) => {
-    if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) return true
-    if (target instanceof HTMLElement && target.isContentEditable) return true
-    return false
-  }
+  // Preserve the visible file and its intra-row offset while Pierre rebuilds a
+  // row. Raw scrollTop is not stable once the virtualizer remeasures dynamic rows.
+  const preserveScroll = createReviewScrollPreserver(rows, virtualizer)
+  const review = createReviewController({
+    diffs: () => props.diffs,
+    rows,
+    comments: () => props.comments,
+    setComments,
+    composer,
+    key: () => props.sessionKey,
+    preserveScroll,
+    focus: focusRoot,
+    label: t,
+    activeTerminalId: () => props.activeTerminalId,
+    active: () => props.active !== false,
+    onSendClick: props.onSendClick,
+    onSendAll: props.onSendAll,
+  })
+  const {
+    pinned,
+    commentsByFile,
+    annotationsForFile,
+    buildAnnotation,
+    handleGutterClick,
+    sendAllToChat,
+    sendAllClick,
+  } = review
 
-  // Run a callback while preserving the scroll position of the diff container.
-  // Pierre destroys and rebuilds the DOM on annotation changes (via innerHTML = ""),
-  // which resets scrollTop. We capture it before the update and restore it across
-  // two animation frames to account for the async shadow-DOM render of <diffs-container>.
-  const preserveScroll = (fn: () => void) => {
-    const el = scroller
-    if (!el) return fn()
-    const top = el.scrollTop
-    fn()
-    requestAnimationFrame(() => {
-      el.scrollTop = top
-      requestAnimationFrame(() => {
-        el.scrollTop = top
-      })
-    })
-  }
-
-  const cancelDraft = () => {
-    preserveScroll(() => {
-      setDraft(null)
-      draftMeta = null
-      composer().draft = null
-    })
-    focusRoot()
-  }
-
-  // Unified open-state effect: tracks both sessionKey and diffs in a single effect
-  // to eliminate the race condition between the old separate sessionKey-reset and
-  // diffs-watch effects. Uses the session key to decide when initialization is needed
-  // vs when we just prune stale entries from the open list.
-  createEffect(
-    on(
-      () => [props.sessionKey, props.diffs] as const,
-      ([key, diffs]) => {
-        // No diffs yet (async fetch in progress) — don't mark as initialized
-        // so auto-open runs when data arrives.
-        // Important: do not prune on empty, otherwise transient empty updates
-        // collapse all files and they stay collapsed for the same key.
-        if (diffs.length === 0) return
-
-        const fileSet = new Set(diffs.map((diff) => diff.file))
-
-        // New context: initialize open state from the diff policy.
-        if (key !== initializedKey) {
-          initializedKey = key
-          setOpen(initialOpenFiles(diffs))
-          return
-        }
-
-        // Already initialized for this key — preserve manual expand/collapse,
-        // only prune files that no longer exist (e.g. deleted during session)
-        setOpen((prev) => {
-          const filtered = prev.filter((file) => fileSet.has(file))
-          if (filtered.length === prev.length && prev.every((f) => fileSet.has(f))) return prev
-          return filtered
-        })
-      },
-    ),
-  )
-
-  createEffect(
-    on(
-      () => props.sessionKey,
-      () => {
-        requested.clear()
-        setDraft(null)
-        draftMeta = null
-        setEditing(null)
-        editMeta = null
-        clearReviewComposer(composer())
-      },
-      { defer: true },
-    ),
-  )
-
-  createEffect(
-    on(
-      () => [open(), props.diffs] as const,
-      ([next]) => {
-        const files = new Set(next)
-        for (const file of requested.keys()) {
-          if (!files.has(file)) requested.delete(file)
-        }
-        if (!props.onRequestDiff) return
-        const loading = props.loadingFiles ?? new Set<string>()
-        for (const file of next) {
-          if (loading.has(file)) continue
-          const diff = props.diffs.find((item) => item.file === file)
-          if (!diff || diff.summarized !== true) continue
-          const value = diffToken(diff)
-          if (requested.get(file) === value) continue
-          requested.set(file, value)
-          props.onRequestDiff(file)
-        }
-      },
-      { defer: true },
-    ),
-  )
-
-  // --- CRUD ---
-
-  const addComment = (file: string, side: AnnotationSide, line: number, text: string, selectedText: string) => {
-    preserveScroll(() => {
-      const id = `c-${++nextId}-${Date.now()}`
-      updateComments((prev) => [...prev, { id, file, side, line, comment: text, selectedText }])
-      setDraft(null)
-      draftMeta = null
-      composer().draft = null
-    })
-    focusRoot()
-  }
-
-  const updateComment = (id: string, text: string) => {
-    preserveScroll(() => {
-      updateComments((prev) => prev.map((c) => (c.id === id ? { ...c, comment: text } : c)))
-      setEditing(null)
-      editMeta = null
-      composer().edit = null
-    })
-    focusRoot()
-  }
-
-  const deleteComment = (id: string) => {
-    preserveScroll(() => {
-      updateComments((prev) => prev.filter((c) => c.id !== id))
-      if (editing() === id) {
-        setEditing(null)
-        editMeta = null
-        composer().edit = null
-      }
-    })
-    focusRoot()
-  }
-
-  const setEditState = (id: string | null) => {
-    if (editing() !== id) {
-      editMeta = null
-      composer().edit = null
-    }
-    preserveScroll(() => setEditing(id))
-    if (id === null) focusRoot()
-  }
-
-  createEffect(
-    on(
-      () => [props.diffs, comments()] as const,
-      ([diffs, current]) => {
-        const valid = sanitizeReviewComments(current, diffs)
-        if (valid.length !== current.length) {
-          setComments(valid)
-        }
-
-        const edit = editing()
-        if (edit && !valid.some((comment) => comment.id === edit)) {
-          setEditing(null)
-          editMeta = null
-          composer().edit = null
-        }
-
-        const currentDraft = draft()
-        if (!currentDraft) return
-        const diff = diffs.find((item) => item.file === currentDraft.file)
-        if (!diff) {
-          setDraft(null)
-          draftMeta = null
-          composer().draft = null
-          return
-        }
-        const content = currentDraft.side === "deletions" ? diff.before : diff.after
-        const max = lineCount(content)
-        if (currentDraft.line < 1 || currentDraft.line > max) {
-          setDraft(null)
-          draftMeta = null
-          composer().draft = null
-          return
-        }
-        if (currentDraft.endLine !== undefined && currentDraft.endLine > max) {
-          setDraft(null)
-          draftMeta = null
-          composer().draft = null
-        }
-      },
-    ),
-  )
-
-  // --- Per-file memoized annotations ---
-
-  const commentsByFile = createMemo(() => {
-    const map = new Map<string, ReviewComment[]>()
-    for (const c of comments()) {
-      const arr = map.get(c.file) ?? []
-      arr.push(c)
-      map.set(c.file, arr)
-    }
-    return map
+  const request = createDiffRequests({
+    key: () => props.sessionKey,
+    diffs: () => props.diffs,
+    open,
+    loading: () => props.loadingFiles,
+    send: () => (props.active === false ? undefined : props.onRequestDiff),
+    eager: false,
   })
 
-  const annotationsForFile = (file: string): DiffLineAnnotation<AnnotationMeta>[] => {
-    const result = buildFileAnnotations(file, commentsByFile().get(file) ?? [], editing(), draft(), draftMeta, editMeta)
-    draftMeta = result.draftMeta
-    editMeta = result.editMeta
-    composer().draft = draft() ? draftMeta : null
-    composer().edit = editing() ? editMeta : null
-    return result.annotations
-  }
-
-  const buildAnnotation = (annotation: DiffLineAnnotation<AnnotationMeta>): HTMLElement | undefined => {
-    return buildReviewAnnotation(annotation, {
-      diffs: props.diffs,
-      editing: editing(),
-      setEditing: setEditState,
-      addComment,
-      updateComment,
-      deleteComment,
-      cancelDraft,
-      labels: labels(),
-      activeTerminalId: props.activeTerminalId,
-      speech: reviewSpeech,
-    })
-  }
-
   const handleRootMouseDown = (e: MouseEvent) => {
-    if (keepNativeFocus(e.target)) return
+    if (keepsNativeFocus(e.target)) return
     focusRoot()
-  }
-
-  // --- Gutter utility click ---
-  const handleGutterClick = (file: string, range: SelectedLineRange) => {
-    // Don't open a second draft while one is active
-    if (draft()) return
-    const side: AnnotationSide = range.side === "deletions" ? "deletions" : "additions"
-    preserveScroll(() => {
-      const next = { file, side, line: range.start, endLine: range.end }
-      draftMeta = { type: "draft", comment: null, ...next }
-      composer().draft = draftMeta
-      setDraft(next)
-    })
-  }
-
-  // --- Send all ---
-  const sendAllToChat = () => {
-    const all = comments()
-    if (all.length === 0) return
-    window.dispatchEvent(
-      new MessageEvent("message", {
-        data: {
-          type: props.activeTerminalId ? "appendReviewCommentsToTerminal" : "appendReviewComments",
-          comments: all,
-          autoSend: true,
-          targetTerminalId: props.activeTerminalId,
-        },
-      }),
-    )
-    preserveScroll(() => setComments([]))
-    props.onSendAll?.()
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Enter") return
     if (!(e.metaKey || e.ctrlKey)) return
     const target = e.target
-    if (keepNativeFocus(target)) return
+    if (keepsNativeFocus(target)) return
     if (comments().length === 0) return
     e.preventDefault()
     e.stopPropagation()
@@ -440,8 +152,8 @@ export const DiffPanel: Component<DiffPanelProps> = (props) => {
     files: props.diffs.length,
     additions: props.diffs.reduce((sum, diff) => sum + diff.additions, 0),
     deletions: props.diffs.reduce((sum, diff) => sum + diff.deletions, 0),
-    large: props.diffs.filter((diff) => isLargeDiffFile(diff)).length,
-    collapsed: Math.max(props.diffs.length - open().length, 0),
+    large: props.diffs.filter((diff) => isDiffExpandable(diff) && isLargeDiffFile(diff)).length,
+    collapsed: props.diffs.filter((diff) => isDiffExpandable(diff) && !open().includes(diff.file)).length,
   }))
   const allOpen = createMemo(() => allOpenFiles(props.diffs, open()))
   const openLabel = () => (allOpen() ? t("ui.sessionReview.collapseAll") : t("ui.sessionReview.expandAll"))
@@ -451,21 +163,18 @@ export const DiffPanel: Component<DiffPanelProps> = (props) => {
     <div class="am-diff-panel" onKeyDown={handleKeyDown} onMouseDown={handleRootMouseDown} tabIndex={-1} ref={rootRef}>
       <div class="am-diff-header">
         <div class="am-diff-header-main">
-          <span class="am-diff-header-title">{t("session.review.change.other")}</span>
+          {/* Scope + base picker replace the static "Changes" title: it names
+              what you're looking at and is the primary control. Always shown,
+              so an empty scope can still be switched away from. */}
+          <Show when={props.lead}>{props.lead}</Show>
           <Show when={props.diffs.length > 0}>
             <>
-              <RadioGroup
-                options={["unified", "split"] as const}
-                current={props.diffStyle ?? "unified"}
-                size="small"
-                value={(style) => style}
-                label={(style) =>
-                  style === "unified" ? t("ui.sessionReview.diffStyle.unified") : t("ui.sessionReview.diffStyle.split")
-                }
-                onSelect={(style) => {
-                  if (!style) return
-                  props.onDiffStyleChange?.(style)
-                }}
+              <DiffStyleSelect
+                value={props.diffStyle ?? "unified"}
+                onSelect={(style) => props.onDiffStyleChange?.(style)}
+                unifiedLabel={t("ui.sessionReview.diffStyle.unified")}
+                splitLabel={t("ui.sessionReview.diffStyle.split")}
+                title={t("ui.sessionReview.diffStyle.unified")}
               />
               <span class="am-diff-header-stats">
                 <span>{t("session.review.filesChanged", { count: totals().files })}</span>
@@ -512,184 +221,64 @@ export const DiffPanel: Component<DiffPanelProps> = (props) => {
         </div>
       </div>
 
+      <Show when={noticeText()}>
+        <div class="diff-viewer-notice" role="status">
+          <span class="diff-viewer-notice-icon">
+            <Icon name="warning" size="small" />
+          </span>
+          <span class="diff-viewer-notice-text">{noticeText()}</span>
+        </div>
+      </Show>
+
       <Show when={props.loading && props.diffs.length === 0}>
         <div class="am-diff-loading">
-          <Spinner />
           <span>{t("session.review.loadingChanges")}</span>
         </div>
       </Show>
 
-      <Show when={!props.loading && props.diffs.length === 0}>
+      <Show when={!props.loading && props.diffs.length === 0 && !noticeText()}>
         <div class="am-diff-empty">
           <span>{t("session.review.noChanges")}</span>
         </div>
       </Show>
 
       <Show when={props.diffs.length > 0}>
-        <div class="am-diff-content" data-component="session-review" ref={scroller}>
-          <Accordion multiple value={open()} onChange={setOpen}>
-            <For each={rows()}>
-              {(diff) => {
-                const isAdded = () => diff.status === "added"
-                const isDeleted = () => diff.status === "deleted"
-                const isLargeCollapsed = () => isLargeDiffFile(diff) && !open().includes(diff.file)
-                const isLoadingDetail = () => props.loadingFiles?.has(diff.file) ?? false
-                const fileCommentCount = () => (commentsByFile().get(diff.file) ?? []).length
-
+        <div class="am-diff-content" data-component="session-review" ref={setScroller}>
+          <Accordion multiple value={open()} onChange={(files) => setOpen(sanitizeOpenFiles(props.diffs, files))}>
+            <VirtualDiffList
+              context={props.sessionKey}
+              data={rows()}
+              scroll={scroller()}
+              keep={pinned()}
+              onReady={setVirtualizer}
+              render={(diff) => {
+                const viewport = createDiffViewport(scroller)
                 return (
-                  <Accordion.Item value={diff.file} data-slot="session-review-accordion-item">
-                    <StickyAccordionHeader>
-                      <Accordion.Trigger>
-                        <div data-slot="session-review-trigger-content">
-                          <div
-                            data-slot="session-review-file-info"
-                            draggable={true}
-                            onDragStart={(e: DragEvent) => {
-                              e.dataTransfer?.setData(KILO_FILE_PATH_MIME, diff.file)
-                              e.dataTransfer?.setData("text/plain", diff.file)
-                              e.stopPropagation()
-                            }}
-                          >
-                            <FileIcon node={{ path: diff.file, type: "file" }} />
-                            <div data-slot="session-review-file-name-container">
-                              <Show when={diff.file.includes("/")}>
-                                <span data-slot="session-review-directory">{`\u2066${getDirectory(diff.file)}\u2069`}</span>
-                              </Show>
-                              <span data-slot="session-review-filename">{getFilename(diff.file)}</span>
-                              <Show when={fileCommentCount() > 0}>
-                                <span class="am-diff-file-badge">{fileCommentCount()}</span>
-                              </Show>
-                            </div>
-                          </div>
-                          <div data-slot="session-review-trigger-actions">
-                            <Show when={isAdded()}>
-                              <span data-slot="session-review-change" data-type="added">
-                                {t("ui.sessionReview.change.added")}
-                              </span>
-                            </Show>
-                            <Show when={isDeleted()}>
-                              <span data-slot="session-review-change" data-type="removed">
-                                {t("ui.sessionReview.change.removed")}
-                              </span>
-                            </Show>
-                            <DiffChanges changes={diff} />
-                            <Show when={isLargeCollapsed()}>
-                              <span class="am-diff-large-pill">{t("agentManager.review.largeFileCollapsed")}</span>
-                            </Show>
-                            <Show when={diff.tracked === false}>
-                              <span class="am-diff-summary-pill">untracked</span>
-                            </Show>
-                            <Show when={diff.generatedLike === true}>
-                              <span class="am-diff-summary-pill">generated</span>
-                            </Show>
-                            <Show when={props.onOpenFile && !isDeleted()}>
-                              <Tooltip value={t("agentManager.diff.openFile")} placement="top">
-                                <IconButton
-                                  icon="go-to-file"
-                                  size="small"
-                                  variant="ghost"
-                                  label={t("agentManager.diff.openFile")}
-                                  onClick={(e: MouseEvent) => {
-                                    e.stopPropagation()
-                                    props.onOpenFile?.(diff.file)
-                                  }}
-                                />
-                              </Tooltip>
-                            </Show>
-                            <Show when={props.onRevertFile}>
-                              <Tooltip value={t("agentManager.diff.revertFile")} placement="top">
-                                <IconButton
-                                  icon="discard"
-                                  size="small"
-                                  variant="ghost"
-                                  class="am-diff-revert-btn"
-                                  label={t("agentManager.diff.revertFile")}
-                                  disabled={props.revertingFiles?.has(diff.file) ?? false}
-                                  onClick={(e: MouseEvent) => {
-                                    e.stopPropagation()
-                                    props.onRevertFile?.(diff.file)
-                                  }}
-                                />
-                              </Tooltip>
-                            </Show>
-                            <Show when={isMarkdownFile(diff.file) && props.onMarkdownRenderChange}>
-                              <Tooltip
-                                value={props.markdownRender ? "Show raw Markdown" : "Render Markdown"}
-                                placement="top"
-                              >
-                                <IconButton
-                                  icon={props.markdownRender ? "code" : "eye"}
-                                  size="small"
-                                  variant="ghost"
-                                  label={props.markdownRender ? "Show raw Markdown" : "Render Markdown"}
-                                  onClick={(e: MouseEvent) => {
-                                    e.stopPropagation()
-                                    props.onMarkdownRenderChange?.(!props.markdownRender)
-                                  }}
-                                />
-                              </Tooltip>
-                            </Show>
-                            <span data-slot="session-review-diff-chevron">
-                              <Icon name="chevron-down" size="small" />
-                            </span>
-                          </div>
-                        </div>
-                      </Accordion.Trigger>
-                    </StickyAccordionHeader>
-                    <Accordion.Content>
-                      <Show when={open().includes(diff.file)}>
-                        <Show
-                          when={diff.summarized !== true}
-                          fallback={
-                            <div class="am-diff-summary-state">
-                              <Show when={isLoadingDetail()} fallback={<span>Diff preview loads on demand.</span>}>
-                                <>
-                                  <Spinner />
-                                  <span>Loading diff...</span>
-                                </>
-                              </Show>
-                            </div>
-                          }
-                        >
-                          <Show
-                            when={props.markdownRender && isMarkdownFile(diff.file)}
-                            fallback={
-                              <Diff<AnnotationMeta>
-                                before={{ name: diff.file, contents: diff.before }}
-                                after={{ name: diff.file, contents: diff.after }}
-                                patch={diff.patch}
-                                diffStyle={props.diffStyle ?? "unified"}
-                                virtualized={!eager().has(diff.file)}
-                                annotations={annotationsForFile(diff.file)}
-                                renderAnnotation={buildAnnotation}
-                                enableGutterUtility={true}
-                                onGutterUtilityClick={(result) => handleGutterClick(diff.file, result)}
-                                onLineNumberClick={(event) => {
-                                  if (event.annotationSide === "deletions") return
-                                  props.onOpenFile?.(diff.file, event.lineNumber)
-                                }}
-                              />
-                            }
-                          >
-                            <MarkdownDiffView
-                              diff={diff}
-                              annotations={annotationsForFile(diff.file)}
-                              renderAnnotation={buildAnnotation}
-                              enableGutterUtility={true}
-                              onGutterUtilityClick={(result) => handleGutterClick(diff.file, result)}
-                              onLineNumberClick={(event) => {
-                                if (event.annotationSide === "deletions") return
-                                props.onOpenFile?.(diff.file, event.lineNumber)
-                              }}
-                            />
-                          </Show>
-                        </Show>
-                      </Show>
-                    </Accordion.Content>
-                  </Accordion.Item>
+                  <ReviewDiffItem
+                    diff={diff}
+                    open={open}
+                    viewport={viewport}
+                    request={request}
+                    active={() => props.active !== false}
+                    loading={() => props.loadingFiles?.has(diff.file) ?? false}
+                    comments={() => (commentsByFile().get(diff.file) ?? []).length}
+                    diffStyle={() => props.diffStyle ?? "unified"}
+                    markdownRender={() => props.markdownRender ?? false}
+                    annotations={() => annotationsForFile(diff.file)}
+                    renderAnnotation={buildAnnotation}
+                    onGutterUtilityClick={(result) => handleGutterClick(diff.file, result)}
+                    onOpenFile={props.onOpenFile}
+                    onOpenDocument={props.onOpenDocument}
+                    onRevertFile={props.canRevert !== false ? props.onRevertFile : undefined}
+                    reverting={() => props.revertingFiles?.has(diff.file) ?? false}
+                    onMarkdownRenderChange={props.onMarkdownRenderChange}
+                    canComment={() => true}
+                    sessionKey={props.sessionKey}
+                    sessionReviewSlot
+                  />
                 )
               }}
-            </For>
+            />
           </Accordion>
           <Show when={props.diffs.length > LONG_DIFF_MARKER_FILE_COUNT}>
             <DiffEndMarker />
@@ -702,7 +291,7 @@ export const DiffPanel: Component<DiffPanelProps> = (props) => {
               {comments().length} comment{comments().length !== 1 ? "s" : ""}
             </span>
             <TooltipKeybind title={t("agentManager.review.sendAllToChat")} keybind={sendAllKeybind()} placement="top">
-              <Button variant="primary" size="small" onClick={sendAllToChat}>
+              <Button variant="primary" size="small" onClick={sendAllClick}>
                 {t("agentManager.review.sendAllToChat")}
               </Button>
             </TooltipKeybind>

@@ -1,6 +1,6 @@
 import { createKiloClient } from "@kilocode/sdk/v2"
 import { RGBA, type CliRenderer } from "@opentui/core"
-import type { HostPluginApi } from "../../src/cli/cmd/tui/plugin/slots"
+import type { HostPluginApi } from "@opencode-ai/tui/plugin/slots"
 import { createTuiResolvedConfig } from "./tui-runtime"
 
 type Count = {
@@ -89,6 +89,7 @@ type Opts = {
   renderer?: HostPluginApi["renderer"]
   attention?: AttentionOpts
   event?: HostPluginApi["event"]
+  mode?: HostPluginApi["mode"]
   count?: Count
   keymap?: HostPluginApi["keymap"]
   tuiConfig?: Partial<HostPluginApi["tuiConfig"]>
@@ -96,6 +97,7 @@ type Opts = {
   state?: {
     ready?: HostPluginApi["state"]["ready"]
     config?: HostPluginApi["state"]["config"]
+    globalConfig?: HostPluginApi["state"]["globalConfig"] // kilocode_change
     provider?: HostPluginApi["state"]["provider"]
     path?: HostPluginApi["state"]["path"]
     vcs?: HostPluginApi["state"]["vcs"]
@@ -196,7 +198,7 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
       soundboard: {
         registerPack: (pack) => opts.attention?.soundboard?.registerPack?.(pack) ?? (() => {}),
         activate: (id, options) => opts.attention?.soundboard?.activate?.(id, options) ?? false,
-        current: () => opts.attention?.soundboard?.current?.() ?? "opencode.default",
+        current: () => opts.attention?.soundboard?.current?.() ?? "kilo.default", // kilocode_change
         list: () => opts.attention?.soundboard?.list?.() ?? [],
       },
     },
@@ -237,6 +239,10 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
       },
     },
     keymap,
+    mode: opts.mode ?? {
+      current: () => "base",
+      push: () => () => {},
+    },
     route: {
       register: () => {
         if (count) count.route_add += 1
@@ -298,6 +304,11 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
       get config() {
         return opts.state?.config ?? {}
       },
+      // kilocode_change start
+      get globalConfig() {
+        return opts.state?.globalConfig ?? {}
+      },
+      // kilocode_change end
       get provider() {
         return opts.state?.provider ?? []
       },

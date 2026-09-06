@@ -6,9 +6,10 @@ import { Effect, Exit, Stream } from "effect"
 import type * as PlatformError from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { testEffect } from "../lib/effect"
 
-const live = CrossSpawnSpawner.defaultLayer
+const live = LayerNode.compile(CrossSpawnSpawner.node)
 const fx = testEffect(live)
 
 function js(code: string, opts?: ChildProcess.CommandOptions) {
@@ -111,13 +112,7 @@ describe("cross-spawn spawner", () => {
             ChildProcess.make(process.execPath, ["-e", "process.stdout.write(process.cwd())"], { cwd: tmp.path }),
           ),
         )
-        const cwd = yield* Effect.promise(() => fs.realpath(tmp.path))
-        const actual = yield* Effect.promise(() => fs.realpath(out))
-        const normalize = (value: string) => {
-          const normalized = path.normalize(value)
-          return process.platform === "win32" ? normalized.toLowerCase() : normalized
-        }
-        expect(normalize(actual)).toBe(normalize(cwd))
+        expect(yield* Effect.promise(() => fs.realpath(out))).toBe(yield* Effect.promise(() => fs.realpath(tmp.path)))
       }),
     )
 
@@ -125,7 +120,9 @@ describe("cross-spawn spawner", () => {
       "fails for invalid cwd",
       Effect.gen(function* () {
         const exit = yield* Effect.exit(
-          ChildProcess.make("echo", ["test"], { cwd: "/nonexistent/directory/path" }).asEffect(),
+          ChildProcessSpawner.ChildProcessSpawner.use((svc) =>
+            svc.spawn(ChildProcess.make("echo", ["test"], { cwd: "/nonexistent/directory/path" })),
+          ),
         )
         expect(Exit.isFailure(exit)).toBe(true)
       }),

@@ -404,11 +404,10 @@ class SessionUpdateQueueTest : SessionControllerTestBase() {
         val sb = StringBuilder()
         for (token in tokens) {
             sb.append(token)
-            emit(ChatEventDto.PartUpdated("ses_test", part("prt1", "ses_test", "msg1", "text", text = sb.toString())))
-            emit(ChatEventDto.PartDelta("ses_test", "msg1", "prt1", "text", token))
+            emit(ChatEventDto.PartUpdated("ses_test", part("prt1", "ses_test", "msg1", "text", text = sb.toString())), flush = false)
+            emit(ChatEventDto.PartDelta("ses_test", "msg1", "prt1", "text", token), flush = false)
+            flush()
         }
-        settle()
-        flush()
 
         val text = (m.model.message("msg1")!!.parts["prt1"] as ai.kilocode.client.session.model.Text).content.toString()
         assertEquals(sb.toString(), text)
@@ -597,7 +596,13 @@ class SessionUpdateQueueTest : SessionControllerTestBase() {
             },
         )
 
-        flush()
+        // History load and recovery are two separate update cycles, and recovery seeds state from the
+        // status flow KiloSessionService collects off the fake RPC. A fixed number of drain rounds does
+        // not always outrun that collection, so wait for both cycles to be observed instead.
+        // Each waitFor round ends in a pumpEdt, so reading the hook log from the test thread is ordered
+        // against the EDT writes the same way the other tests in this file rely on.
+        val both = waitFor { order.size >= 4 }
+        assertTrue("history load and recovery did not both run, saw $order", both)
 
         assertTrue(order.contains("before:0"))
         assertTrue(order.contains("after:true:1"))

@@ -79,6 +79,11 @@ export type TuiKeys = {
 
 export type TuiKeymap = Keymap<Renderable, KeyEvent>
 
+export type TuiModeApi = {
+  current: () => string
+  push: (mode: string) => () => void
+}
+
 /**
  * Legacy `api.command` shape kept so v1 plugins can initialize. Remove in v2.
  *
@@ -206,7 +211,6 @@ export type TuiPromptRef = {
 
 export type TuiPromptProps = {
   sessionID?: string
-  workspaceID?: string
   visible?: boolean
   disabled?: boolean
   onSubmit?: () => void
@@ -372,6 +376,7 @@ export type TuiKV = {
 export type TuiState = {
   readonly ready: boolean
   readonly config: SdkConfig
+  readonly globalConfig: SdkConfig
   readonly provider: ReadonlyArray<Provider>
   readonly path: {
     state: string
@@ -379,7 +384,7 @@ export type TuiState = {
     worktree: string
     directory: string
   }
-  readonly vcs: { branch?: string } | undefined
+  readonly vcs: { branch?: string; default_branch?: string } | undefined
   session: {
     count: () => number
     get: (sessionID: string) => Session | undefined
@@ -460,12 +465,9 @@ export type TuiHostSlotMap = {
   app_bottom: {}
   home_logo: {}
   home_prompt: {
-    workspace_id?: string
     ref?: (ref: TuiPromptRef | undefined) => void
   }
-  home_prompt_right: {
-    workspace_id?: string
-  }
+  home_prompt_right: {}
   session_prompt: {
     session_id: string
     visible?: boolean
@@ -596,6 +598,7 @@ export type TuiPluginApi = {
   command?: TuiCommandApi
   keys: TuiKeys
   keymap: TuiKeymap
+  mode: TuiModeApi
   route: {
     register: (routes: TuiRouteDefinition[]) => () => void
     navigate: (name: string, params?: Record<string, unknown>) => void
